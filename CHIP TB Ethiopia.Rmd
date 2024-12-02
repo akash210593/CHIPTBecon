@@ -1,0 +1,978 @@
+---
+title: "CHIP TB Ethiopia"
+author: "Akash Malhotra"
+output: html_document
+date: '2023-01-03'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Research Questions: 
+
+1. What is the mean difference in patient and health system costs/benefits for delivering TPT to child HH contacts between the intervention and the control arms? 
+
+2. What is the incremental cost-effectiveness ratio (ICER) between the control and intervention arms where effectiveness is modeled as the number of child household contacts initiated on TPT, and number of child contacts successfully completing TPT?  
+
+Intervention Arm: 168 index patients in the intervention arm inquired about child HH contact tracing 
+Control SoC arm: 186 index patients in the control arm inquired about child HH contact tracing
+
+Inputs
+
+
+intervention arm:
+
+-- initiated on TPT divided by index patients
+-- completing TPT divided by index patients
+-- delivery costs per index case
+-- Patient costs per index case
+
+Control arm : 
+
+-- initiated on TPT divided by index patients
+-- completing TPT divided by index patients
+-- delivery costs per index case
+-- Patient costs per index case
+
+
+
+
+```{r packages}
+
+library(ggplot2)
+library(dplyr)
+library(triangle)
+library(car)
+library(collapse)
+```
+
+#First, set up the treatment.sim function by denoting all relevant input parameters you’re doing PSA with, and then some function for coming up with your total costs and total effectiveness. (may just be an aggregate sum of each).
+
+
+```{r create model parameters}
+
+#UPDATE ALL
+treatment.sim<-function(
+    num.ind.int, #number of index patients enrolled in the intervention arm --- 168 (+- 20% 201.6, 134.4)
+    num.ind.con, #number of index patients enrolled in the control arm --- 186 (+- 20% 223.2, 148.8)
+    num.tpt.sta.int, # nuber of children initiating TPT in the intervention arm -- 281
+    num.tpt.sta.con, # number of children initiating TPT in the control control arm -- 246
+       ratio.tpt.sta.int, #ratio of those initaiting TPT to number of index cases in the  intervention arm -- 1.66 cluter ratio, xx overall ratio, cluster range (1.00, 3.00)
+    ratio.tpt.sta.con,#ratio of those initaiting TPT to number of index cases in the control arm  -- 1.33 cluster ratio, 1.31 overall ratio, cluster range (0.24, 2.48)
+    num.tpt.end.int, # nuber of children successfully completing TPT in the intervention arm -- 258
+    num.tpt.end.con, # number of children successfully completing TPT in the control control arm -- 235
+    ratio.tpt.end.int, #ratio of those successfully completing TPT to number of index cases in the intervention arm 1.55 cluster ratio, 1.54 overall, cluster range (1.00,2.67)
+    ratio.tpt.end.con,#ratio of those successfully completing TPT to number of index cases in the control arm 1.31 cluster ratio, 1.26 overall ratio, cluster range (0.24, 2.28)
+    
+    #ranges for ratios are bounded by best and worst performing clinics, average of cluster ratios is point estimate 
+    
+    # ranges for delivery costs are bounded by how many years we assume effects of one time investment to last 5 years is max cost, 20 is min cost and 10 is point estimate 
+    
+    # ranges for patient costs bounded by min and max cost reported, sampled using beta
+    # ranges for health system staff salary based on annual increments 
+    
+    cost.com.int, #per household communication and publication costs in the intervention arm 0.78 (0.32, 1.46)
+    cost.com.con, #per household communication and publication costs in the control arm 0.44 (0.18, 0.83) 
+    cost.eps.int, #per household external professional services costs in the intervention arm 0.21 (0.04, 1.33)
+    cost.eps.con, #per household external professional services costs in the control arm 0.13 (0.03, 0.84)
+    cost.ope.int, #per household other project expense costs in the intervention arm 0.18 (0.04, 1.13)
+    cost.ope.con, #per household other project expense costs in the control arm 0.15 (0.03, 0.97)
+    cost.ps.int, #per household project staff costs in the intervention arm 6.32 (2.83, 17.45)
+    cost.ps.con, #per household project staff costs in the control arm 3.63 (1.62, 10.08)
+    cost.tt.int, #per household travel and training costs in the intervention arm 4.54 (2.07, 11.91)
+    cost.tt.con, #per household travel and training costs in the control arm 2.61 (1.19, 6.91)
+    cost.eqp.int, #per household non-health equipment costs in the intervention arm 1.17 (0.56, 2.73)
+    cost.eqp.con, #per household non-health equipment costs in the control arm 0.27 (0.13, 0.62)
+ 
+    cost.hss.int, #per household health system staff costs in the intervention arm 3.10 (1.57, 6.18)
+    cost.hss.con, #per household health system staff costs in the control arm 6.27 (2.94, 11.88)
+    cost.oop.int, # per household out of pocket costs in the intervention arm 0.61 (0, 7.70)
+    cost.oop.con, # per household out of pocket costs in the control arm 9.94 (0, 31.76)
+    cost.mw.int, # per household costs owing to missed work in the intervention arm 0.59 (0,11.55)
+    cost.mw.con # per household costs owing to missed work in the control arm 1.76 (0, 17.32)
+    #cost.err.int, #per household error costs in the intervention arm +- 10%
+    #cost.err.con, #per household error costs in the control arm +- 10% 
+    
+     ) { #Here, set up our values of interest (total cost and # of patients initiating and completing treatment)
+  tpt_ini_int <- num.ind.int * ratio.tpt.sta.int
+  tpt_ini_con <- num.ind.con * ratio.tpt.sta.con
+  tpt_end_int <- num.ind.int * ratio.tpt.end.int
+  tpt_end_con <- num.ind.con * ratio.tpt.end.con
+  
+ 
+  #Next, calculate the total costs for each cost category
+
+ tot.cost.com.int <- cost.com.int * num.ind.int
+ tot.cost.com.con <- cost.com.con * num.ind.con
+ tot.cost.eps.int <- cost.eps.int * num.ind.int
+ tot.cost.eps.con <- cost.eps.int * num.ind.con
+ tot.cost.ope.int <- cost.ope.int * num.ind.int
+ tot.cost.ope.con <- cost.ope.con * num.ind.con
+ tot.cost.ps.int <- cost.ps.int * num.ind.int
+ tot.cost.ps.con <- cost.ps.con * num.ind.con
+ tot.cost.tt.int <- cost.tt.int * num.ind.int
+ tot.cost.tt.con <- cost.tt.con * num.ind.con
+ tot.cost.eqp.int <- cost.eqp.int * num.ind.int
+ tot.cost.eqp.con <- cost.eqp.con * num.ind.con
+ tot.cost.hss.int <- cost.hss.int * num.ind.int
+ tot.cost.hss.con <- cost.hss.con * num.ind.con
+ tot.cost.oop.int <- cost.oop.int * num.ind.int
+ tot.cost.oop.con <- cost.oop.con * num.ind.con
+ tot.cost.mw.int <- cost.mw.int * num.ind.int
+ tot.cost.mw.con <- cost.mw.con * num.ind.con
+ 
+ pp.del.cost.int <- cost.com.int + cost.eps.int + cost.ope.int + cost.ps.int + cost.tt.int + cost.eqp.int + cost.hss.int
+ pp.del.cost.con<- cost.com.con + cost.eps.con + cost.ope.con + cost.ps.con + cost.tt.con + cost.eqp.con + cost.hss.con
+ 
+ pp.pat.cost.int <- cost.oop.int + cost.mw.int
+ pp.pat.cost.con <- cost.oop.con + cost.mw.con
+ 
+ pp.tot.cost.int <- pp.del.cost.int + pp.pat.cost.int
+ pp.tot.cost.con <- pp.del.cost.con + pp.pat.cost.con
+ 
+ ovr.del.cost.int <- pp.del.cost.int * num.ind.int
+ ovr.del.cost.con <- pp.del.cost.con * num.ind.con
+ 
+ ovr.pat.cost.int <- pp.pat.cost.int * num.ind.int
+ ovr.pat.cost.con <- pp.pat.cost.con * num.ind.con
+ 
+ ovr.tot.cost.int <- pp.tot.cost.int * num.ind.int
+ ovr.tot.cost.con <- pp.tot.cost.con * num.ind.con
+ 
+ ########### ICER VALUES #############
+## The ICER is calcualted from a delivery/health system perspective
+ 
+  incr.total.cost <- (ovr.tot.cost.int - ovr.tot.cost.con)
+  incr.total.effect.ini <- (tpt_ini_int - tpt_ini_con)
+  incr.total.effect.end <- (tpt_end_int - tpt_end_con)
+  incr.ratio.ini <- (incr.total.cost / incr.total.effect.ini)
+  incr.ratio.end <- (incr.total.cost / incr.total.effect.end)
+  
+  #cost per child initiating and completing TPT
+  cost.per.ini.int <- ovr.del.cost.int / tpt_ini_int
+  cost.per.ini.con <- ovr.del.cost.con / tpt_ini_con
+  cost.per.end.int <- ovr.del.cost.int / tpt_end_int
+  cost.per.end.con <- ovr.del.cost.int / tpt_end_con
+  
+  #return the key results: cure and cost in each scenario
+  
+  results<-c(num.ind.int,
+             num.ind.con,
+             ratio.tpt.sta.int,
+             ratio.tpt.sta.con,
+             ratio.tpt.end.int,
+             ratio.tpt.end.con,
+             tpt_ini_int,
+             tpt_ini_con,
+             tpt_end_int,
+             tpt_end_con,
+             cost.com.int,
+             tot.cost.com.int,
+             cost.com.con,
+             tot.cost.com.con,
+             cost.eps.int,
+             tot.cost.eps.int,
+             cost.eps.con,
+             tot.cost.eps.con,
+             cost.ope.int,
+             tot.cost.ope.int,
+             cost.ope.con,
+             tot.cost.ope.con,
+             cost.ps.int,
+             tot.cost.ps.int,
+             cost.ps.con,
+             tot.cost.ps.con,
+             cost.tt.int,
+             tot.cost.tt.int,
+             cost.tt.con,
+             tot.cost.tt.con,
+             cost.eqp.int,
+             tot.cost.eqp.int,
+             cost.eqp.con,
+             tot.cost.eqp.con,
+             cost.hss.int,
+             tot.cost.hss.int,
+             cost.hss.con,
+             tot.cost.hss.con,
+             cost.oop.int,
+             tot.cost.oop.int,
+             cost.oop.con,
+             tot.cost.oop.con,
+             cost.mw.int,
+             tot.cost.mw.int,
+             cost.mw.con,
+             tot.cost.mw.con,
+             pp.del.cost.int,
+             pp.del.cost.con,
+             pp.pat.cost.int,
+             pp.pat.cost.con,
+             pp.tot.cost.int,
+             pp.tot.cost.con,
+             ovr.del.cost.int,
+             ovr.del.cost.con,
+             ovr.pat.cost.int,
+             ovr.pat.cost.con,
+             ovr.tot.cost.int,
+             ovr.tot.cost.con,
+             incr.total.cost,
+             incr.total.effect.ini,
+             incr.total.effect.end,
+             incr.ratio.ini,
+             incr.ratio.end,
+             cost.per.ini.int,
+             cost.per.ini.con,
+             cost.per.end.int,
+             cost.per.end.con)
+  
+   names(results)<-c("Intervention households",
+                    "Control households",
+                    "Initiation ratio intervention",
+                    "Initiation ratio control",
+                    "Completion ratio intervention",
+                    "Completion ratio control",
+                    "TPT initiated intervention",
+                    "TPT initiated control",
+                    "TPT completed intervention",
+                    "TPT completed control",
+                    "Per HH comm cost intervention",
+                    "Total comm cost intervention",
+                    "Per HH comm cost control",
+                    "Total comm cost control",
+                    "Per HH EPS cost intervention",
+                    "Total EPS cost intervention",
+                    "CPer HH EPS cost control",
+                    "Total EPS cost control",
+                    "Per HH OPE cost intervention",
+                    "Total OPE cost intervention",
+                    "Per HH OPE cost control",
+                    "Total OPE cost control",
+                    "Per HH project staff cost intervention",
+                    "Total project staff cost intervention",
+                    "Per HH project staff cost control",
+                    "Total project staff cost control",
+                    "Per HH TT cost intervention",
+                    "Total TT cost intervention",
+                    "Per HH TT cost control",
+                    "Total TT cost control",
+                    "Per HH equipment cost intervention",
+                    "Total equipment cost intervention",
+                    "Per HH equipment cost control",
+                    "Total equipment cost control",
+                    "Per HH HSS cost intervention",
+                    "Total HSS cost intervention",
+                    "Per HH HSS cost control",
+                    "Total HSS cost control",
+                    "Per HH OOP cost intervention",
+                    "Total OOP cost intervention",
+                    "Per HH OOP cost control",
+                    "Total OOP cost control",
+                    "Per HH missed work cost intervention",
+                    "Total missed work cost intervention",
+                    "Per HH missed work cost control",
+                    "Total missed work cost control",
+                    "Per HH delivery cost intervention",
+                    "Per HH delivery cost control",
+                    "Per HH patient cost intervention",
+                    "Per HH patient cost control",
+                    "Per HH total cost intervention",
+                    "Per HH total cost control",
+                    "Overall delivery cost intervention",
+                    "Overall delivery cost control",
+                    "Overall patient cost intervention",
+                    "Overall patient cost control",
+                    "Overall total cost intervention",
+                    "Overall total cost control",
+                    "Incremental cost",
+                    "Incremental initation effect",
+                    "Incremental completion effect",
+                    "ICER initiation",
+                    "ICER completion",
+                    "Cost per initiation intervention",
+                    "Cost per initiation control",
+                    "Cost per completion intervention",
+                    "Cost per completion control"
+   )
+           
+  
+  return(results)
+}
+```             
+
+
+```{r set-up the parameter values}
+param.ranges<-data.frame("variable"=character(24), 
+                         "distribution"=character(24),
+                         "parameter1"=numeric(24),
+                         "parameter2"=numeric(24),
+                         "parameter3"=numeric(24),
+                         "parameter1.name"=numeric(24), 
+                         "parameter2.name"=numeric(24),
+                         "parameter3.name"=numeric(24))
+
+param.ranges[,"variable"]<-c(
+             "num.ind.int",
+             "num.ind.con",
+             "ratio.tpt.sta.int",
+             "ratio.tpt.sta.con",
+             "ratio.tpt.end.int",
+             "ratio.tpt.end.con",
+             "cost.com.int",
+             "cost.com.con",
+             "cost.eps.int",
+             "cost.eps.con",
+             "cost.ope.int",
+             "cost.ope.con",
+             "cost.ps.int",
+             "cost.ps.con",
+             "cost.tt.int",
+             "cost.tt.con",
+             "cost.eqp.int",
+             "cost.eqp.con",
+             "cost.hss.int",
+             "cost.hss.con",
+             "cost.oop.int",
+             "cost.oop.con",
+             "cost.mw.int",
+             "cost.mw.con"
+             
+)
+
+#Assigns a name to each of the above variables in the param.ranges data frame.
+
+           
+param.ranges[,"distribution"]<-c(
+"beta", #Intervention households
+"beta", #Control households
+"beta", #Initiation ratio intervention
+"beta", #Initiation ratio control
+"beta", #Completion ratio intervention
+"beta", #Completion ratio control
+"beta", #Communication cost intervention
+"beta", #Communication cost control
+"beta", #EPS cost intervention
+"beta", #EPS cost control
+"beta", #OPE cost intervention
+"beta", #OPE cost control
+"beta", #PS cost intervention
+"beta", #PS cost control
+"beta", #TT cost intervention
+"beta", #TT cost control
+"beta", #Equipment cost intervention
+"beta", #Equipment cost control
+"beta", #HSS cost intervention
+"beta", #HSS cost control
+"beta", #OOP cost intervention
+"beta", #OOP cost control
+"beta", #MW cost intervention
+"beta" #MW cost control
+
+)
+#Assigns a distribution to each parameter. Note: common cost distributions are uniform, normal, triangular, and beta.
+
+#Minimum values
+ param.ranges[,"parameter1"]<-c(
+134.4, #Intervention households
+148.8, #Control households
+1.00, #Initiation ratio intervention
+0.24, #Initiation ratio control
+1.00, #Completion ratio intervention
+0.24, #Completion ratio control
+0.32, #Communication cost intervention
+0.18, #Communication cost control
+0.04, #EPS cost intervention
+0.03, #EPS cost control
+0.04, #OPE cost intervention
+0.03, #OPE cost control
+2.83, #PS cost intervention
+1.62, #PS cost control
+2.07, #TT cost intervention
+1.19, #TT cost control
+0.56, #Equipment cost intervention
+0.13, #Equipment cost control
+1.57, #HSS cost intervention
+2.94, #HSS cost control
+0, #OOP cost intervention
+0, #OOP cost control
+0, #MW cost intervention
+0 #MW cost control
+)
+
+ #Max values
+  param.ranges[,"parameter2"]<-c(
+201.6, #Intervention households
+223.2, #Control households
+3.00, #Initiation ratio intervention
+2.48, #Initiation ratio control
+2.67, #Completion ratio intervention
+2.28, #Completion ratio control
+1.46, #Communication cost intervention
+0.83, #Communication cost control
+1.33, #EPS cost intervention
+0.84, #EPS cost control
+1.13, #OPE cost intervention
+0.97, #OPE cost control
+17.45, #PS cost intervention
+10.08, #PS cost control
+11.91, #TT cost intervention
+6.91, #TT cost control
+2.73, #Equipment cost intervention
+0.62, #Equipment cost control
+6.18, #HSS cost intervention
+11.88, #HSS cost control
+7.70, #OOP cost intervention
+31.76, #OOP cost control
+11.55, #MW cost intervention
+17.32 #MW cost control
+)
+  #PE
+    param.ranges[,"parameter3"]<-c(
+168, #Intervention households
+186, #Control households
+1.66, #Initiation ratio intervention
+1.34, #Initiation ratio control
+1.55, #Completion ratio intervention
+1.31, #Completion ratio control
+0.78, #Communication cost intervention
+0.44, #Communication cost control
+0.21, #EPS cost intervention
+0.13, #EPS cost control
+0.18, #OPE cost intervention
+0.15, #OPE cost control
+6.32, #PS cost intervention
+3.63, #PS cost control
+4.54, #TT cost intervention
+2.61, #TT cost control
+1.17, #Equipment cost intervention
+0.27, #Equipment cost control
+3.10, #HSS cost intervention
+6.27, #HSS cost control
+0.61, #OOP cost intervention
+9.94, #OOP cost control
+0.59, #MW cost intervention
+1.76 #MW cost control
+)
+    ```
+    
+```{r add the alpha and beta values}
+#Updated with inflation
+param.ranges[,"parameter1.name"]<-c( #The ALPHA value
+4, #Intervention households
+4, #Control households
+4, #Initiation ratio intervention
+4, #Initiation ratio control
+4, #Completion ratio intervention
+4, #Completion ratio control
+4, #Communication cost intervention
+4, #Communication cost control
+4, #EPS cost intervention
+4, #EPS cost control
+4, #OPE cost intervention
+4, #OPE cost control
+4, #PS cost intervention
+4, #PS cost control
+4, #TT cost intervention
+4, #TT cost control
+4, #Equipment cost intervention
+4, #Equipment cost control
+4, #HSS cost intervention
+4, #HSS cost control
+4, #OOP cost intervention
+4, #OOP cost control
+4, #MW cost intervention
+4 #MW cost control
+  )
+  
+param.ranges[,"parameter2.name"]<-c( #The BETA value
+  4, #Intervention households
+4, #Control households
+7.09, #Initiation ratio intervention
+4.11, #Initiation ratio control
+7.11, #Completion ratio intervention
+3.72, #Completion ratio control
+5.50, #Communication cost intervention
+5.50, #Communication cost control
+20.89, #EPS cost intervention
+20.89, #EPS cost control
+20.89, #OPE cost intervention
+20.89, #OPE cost control
+10.56, #PS cost intervention
+10.64, #PS cost control
+9.99, #TT cost intervention
+10.09, #TT cost control
+8.63, #Equipment cost intervention
+8.63, #Equipment cost control
+7.00, #HSS cost intervention
+6.04, #HSS cost control
+35.87, #OOP cost intervention
+7.59, #OOP cost control
+56.73, #MW cost intervention
+27.52 #MW cost control
+  )
+
+param.ranges[,"parameter3.name"]<-c(#Non-centrality parameter, ask David/Hojoon what that is
+0, #Intervention households
+0, #Control households
+0, #Initiation ratio intervention
+0, #Initiation ratio control
+0, #Completion ratio intervention
+0, #Completion ratio control
+0, #Communication cost intervention
+0, #Communication cost control
+0, #EPS cost intervention
+0, #EPS cost control
+0, #OPE cost intervention
+0, #OPE cost control
+0, #PS cost intervention
+0, #PS cost control
+0, #TT cost intervention
+0, #TT cost control
+0, #Equipment cost intervention
+0, #Equipment cost control
+0, #HSS cost intervention
+0, #HSS cost control
+0, #OOP cost intervention
+0, #OOP cost control
+0, #MW cost intervention
+0 #MW cost control
+  ) 
+
+
+```
+
+
+```{r simulation prep, repetitions and matrix}
+#Define the number of simulations you intend to perform
+set.seed(269130)
+n.sims<-1000
+
+
+#Create a matrix to hold all of the sampled parameter values
+#Each row will represent 1 simulation; the columns in the row will correspond to the sampled parameter values for the row
+sampled.values<-matrix(nrow=n.sims,ncol=nrow(param.ranges))
+colnames(sampled.values)<-param.ranges[,"variable"]
+
+#Loop over the parameters (columns in sampled.values, rows in param.ranges) that will be sampled
+for(p in 1:ncol(sampled.values)){
+  
+  #check for the distribution that will be used
+  #check for a uniform distribution
+  if(param.ranges[p,"distribution"]=="uniform"){
+    
+    n.params<-runif( #sample from a uniform distribution
+      n.sims, #how many samples to draw = the number of simulations you will perform
+      min=param.ranges[p,"parameter1"], #define the lower bound parameter
+      max=param.ranges[p,"parameter2"] #define the upper bound
+    )
+    #exit the if-loop and go to the end
+    
+  }
+  #if not uniform, check if it is normal
+  if(param.ranges[p,"distribution"]=="normal"){
+    
+    n.params<-rnorm( #sample from a normal distribution
+      n.sims, #how many samples to draw = the number of simulations you will perform
+      mean=param.ranges[p,"parameter1"], #define the lower bound parameter
+      sd=param.ranges[p,"parameter2"] #define the upper bound
+    )
+    #exit the if-loop and go to the end
+    
+  }
+  
+  #if not uniform, check if it is lognormal
+  if(param.ranges[p,"distribution"]=="lognormal"){
+    
+    n.params<-rlnorm( #sample from a log-normal distribution
+      n.sims, #how many samples to draw = the number of simulations you will perform
+      meanlog=param.ranges[p,"parameter1"], #define the mean parameter
+      sdlog=param.ranges[p,"parameter2"] #define the standard deviation parameter
+    )
+    #exit the if-loop and go to the end
+    
+  }
+  
+  #if not lognormal, check if it is gamma
+  if(param.ranges[p,"distribution"]=="gamma"){
+    n.params<-rgamma( #sample from a log-normal distribution
+      n.sims, #how many samples to draw = the number of simulations you will perform
+      shape=param.ranges[p,"parameter1"], #define the k parameter
+      scale=param.ranges[p,"parameter2"] #define the theta parameter
+    )
+    #exit the if-loop and go to the end
+    
+  }
+  
+  #if not gamma, check if it is triangular
+  if(param.ranges[p,"distribution"]=="triangular"){
+    n.params<- rtriangle( #sample from a triangular distribution
+      n.sims, #how many samples to draw = the number of simulations you will perform
+      a = param.ranges[p,"parameter1"], #define the lower bound paramater/parameter input 1
+      b = param.ranges[p,"parameter2"], #define the upper bound parameter
+      c = param.ranges[p,"parameter3"] #define the mode/central tendency parameter
+    )
+  }
+  
+  #if not triangular, check if it is beta
+  if(param.ranges[p,"distribution"]=="beta"){
+    n.params<- rbeta( #sample from a beta distribution
+      n.sims, #how many samples to draw = the number of simulations you will perform
+      shape1 = param.ranges[p,"parameter1.name"], #define the alpha shape parameter
+      shape2 = param.ranges[p,"parameter2.name"], #define the beta shape parameter
+      ncp = param.ranges[p,"parameter3.name"] #define the non-centrality parameter (should be 0)
+    ) 
+    #(parameter1 + (p *(parameter2 - parameter1)))
+  }
+  sampled.values[,p]<-n.params #fill the column of the matrix with the vector of sampled values
+  
+  #go to the next column
+}
+
+```
+
+
+```{r calculate "true" simulated values}
+#Change variable names to match CHIP TB, no other changes
+num.ind.int <- (sampled.values[,1] * (param.ranges[1,4] - param.ranges[1,3])) + param.ranges[1,3]
+
+num.ind.con <- (sampled.values[,2] * (param.ranges[2,4] - param.ranges[2,3])) + param.ranges[2,3] 
+
+ratio.tpt.sta.int <- (sampled.values[,3] * (param.ranges[3,4] - param.ranges[3,3])) + param.ranges[3,3]
+
+ratio.tpt.sta.con <- (sampled.values[,4] * (param.ranges[4,4] - param.ranges[4,3])) + param.ranges[4,3] 
+
+ratio.tpt.end.int <- (sampled.values[,5] * (param.ranges[5,4] - param.ranges[5,3])) + param.ranges[5,3]
+
+ratio.tpt.end.con <- (sampled.values[,6] * (param.ranges[6,4] - param.ranges[6,3])) + param.ranges[6,3] 
+
+cost.com.int <- (sampled.values[,7] * (param.ranges[7,4] - param.ranges[7,3])) + param.ranges[7,3]
+
+cost.com.con <- (sampled.values[,8] * (param.ranges[8,4] - param.ranges[8,3])) + param.ranges[8,3] 
+
+cost.eps.int <- (sampled.values[,9] * (param.ranges[9,4] - param.ranges[9,3])) + param.ranges[9,3]
+
+cost.eps.con <- (sampled.values[,10] * (param.ranges[10,4] - param.ranges[10,3])) + param.ranges[10,3]
+
+cost.ope.int <- (sampled.values[,11] * (param.ranges[11,4] - param.ranges[11,3])) + param.ranges[11,3]
+
+cost.ope.con <- (sampled.values[,12] * (param.ranges[12,4] - param.ranges[12,3])) + param.ranges[12,3]
+
+
+cost.ps.int <- (sampled.values[,13] * (param.ranges[13,4] - param.ranges[13,3])) + param.ranges[13,3]
+
+cost.ps.con <- (sampled.values[,14] * (param.ranges[14,4] - param.ranges[14,3])) + param.ranges[14,3]
+
+
+cost.tt.int <- (sampled.values[,15] * (param.ranges[15,4] - param.ranges[15,3])) + param.ranges[15,3]
+
+cost.tt.con <- (sampled.values[,16] * (param.ranges[16,4] - param.ranges[16,3])) + param.ranges[16,3]
+
+cost.eqp.int <- (sampled.values[,17] * (param.ranges[17,4] - param.ranges[17,3])) + param.ranges[17,3]
+
+cost.eqp.con <- (sampled.values[,18] * (param.ranges[18,4] - param.ranges[18,3])) + param.ranges[18,3]
+
+cost.hss.int <- (sampled.values[,19] * (param.ranges[19,4] - param.ranges[19,3])) + param.ranges[19,3]
+
+cost.hss.con <- (sampled.values[,20] * (param.ranges[20,4] - param.ranges[20,3])) + param.ranges[20,3]
+
+cost.oop.int <- (sampled.values[,21] * (param.ranges[21,4] - param.ranges[21,3])) + param.ranges[21,3]
+
+cost.oop.con <- (sampled.values[,22] * (param.ranges[22,4] - param.ranges[22,3])) + param.ranges[22,3]
+
+cost.mw.int <- (sampled.values[,23] * (param.ranges[23,4] - param.ranges[23,3])) + param.ranges[23,3]
+
+cost.mw.con <- (sampled.values[,24] * (param.ranges[24,4] - param.ranges[24,3])) + param.ranges[24,3]
+
+sampled.values.true <- cbind( num.ind.int,
+             num.ind.con,
+             ratio.tpt.sta.int,
+             ratio.tpt.sta.con,
+             ratio.tpt.end.int,
+             ratio.tpt.end.con,
+             cost.com.int,
+             cost.com.con,
+             cost.eps.int,
+             cost.eps.con,
+             cost.ope.int,
+             cost.ope.con,
+             cost.ps.int,
+             cost.ps.con,
+             cost.tt.int,
+             cost.tt.con,
+             cost.eqp.int,
+             cost.eqp.con,
+             cost.hss.int,
+             cost.hss.con,
+             cost.oop.int,
+             cost.oop.con,
+             cost.mw.int,
+             cost.mw.con
+)
+
+```
+
+```{R Run the Simulations}
+#NO CHANGES
+#Perform your simulations using a combination of apply() and do.call()
+#apply() will iteratively perform the same function to each row and/or column of a matrix argument
+#The matrix of sampled input values will serve as our matrix argument X
+#We will set MARGIN=1 to indicate that we want to iterate over the rows (not columns) of the matrix
+#We will create a custom function to apply over each row (r)
+#The key of the custom function is do.call() 
+#do.call() calls a function of your choice and passes user-defined arguments to it
+#we will use it to call our previously-defined function treatment.sim()
+#We will supply it our row of sampled input values as user-defined arguments
+#arguments for do.call() must be in the form of a list: as.list(r)
+#apply() returns the outputs of each iteration as a column of a matrix
+#for ease of use, we will transpose - t() - the matrix so that each iteration will be returned as a row
+
+sim.out<-t(apply(X=sampled.values.true,MARGIN=1, FUN=function(r) do.call(what=treatment.sim, args=as.list(r)) ))
+#for each row of sampled.values, run function r which is our treatment.sim formula.
+sim.out.df <- as.data.frame(sim.out)
+
+
+
+#Becase treatment.sim() returns a vector of 4 results ("Scenario1.Cure","Scenario1.Cost","Scenario2.Cure","Scenario2.Cost")
+#sim.out contains 4 columns, each corresponding to one of the outputs of treatment.sim()
+#The first row of sim.out corresponds to the results of the simulation created by the first row of sampled input values in sampled.value
+```
+
+View(sim.out.df)
+
+```{r ICER values}
+#Change columns to match sim.out.df in CHIPTB
+ICER<-matrix(ncol=13, nrow=nrow(sim.out.df))
+colnames(ICER)<-c("Incremental.Effectiveness.Initiation","Incremental.Effectiveness.Completion", "Incremental.Cost", "Ratio.Initiation", "Ratio.Completion", "Del.Cost.per.initiation.intervention", "Del.Cost.per.initiation.control", "Del.Cost.per.completion.intervention", "Del.Cost.per.completion.control", "Tot.Cost.per.initiation.intervention", "Tot.Cost.per.initiation.control", "Tot.Cost.per.completion.intervention", "Tot.Cost.per.completion.control")
+
+ICER[,1]<-sim.out.df[,7]-sim.out.df[,8] #
+ICER[,2]<-sim.out.df[,9]-sim.out.df[,10] #
+ICER[,3]<-sim.out.df[,53]-sim.out.df[,54] #
+ICER[,4]<-ICER[,3]/ICER[,1] 
+ICER[,5]<-ICER[,3]/ICER[,2] 
+
+#Cost-effectiveness outcomes
+ICER[,6]<-sim.out.df[,53]/sim.out.df[,7] #
+ICER[,7]<-sim.out.df[,54]/sim.out.df[,8] #
+ICER[,8]<-sim.out.df[,53]/sim.out.df[,9] #
+ICER[,9]<-sim.out.df[,54]/sim.out.df[,10] #
+
+#per child total costs
+ICER[,10]<-sim.out.df[,57]/sim.out.df[,7] #
+ICER[,11]<-sim.out.df[,58]/sim.out.df[,8] #
+ICER[,12]<-sim.out.df[,57]/sim.out.df[,9] #
+ICER[,13]<-sim.out.df[,58]/sim.out.df[,10] #
+
+#cost effectiveness
+ICER.df <- data.frame(ICER)
+mean_effect_initiation <- mean(ICER.df$Incremental.Effectiveness.Initiation)
+mean_effect_completion <- mean(ICER.df$Incremental.Effectiveness.Completion)
+mean_cost <- mean(ICER.df$Incremental.Cost)
+mean_icer_initiation <- mean(ICER.df$Ratio.Initiation)
+mean_icer_completion <- mean(ICER.df$Ratio.Completion)
+median_icer_initiation <- median(ICER.df$Ratio.Initiation)
+median_icer_completion <- median(ICER.df$Ratio.Completion)
+
+median_cost_ini_int <- median(ICER.df$Cost.per.initiation.intervention)
+median_cost_ini_con <- median(ICER.df$Cost.per.initiation.control)
+median_cost_end_int <- median(ICER.df$Cost.per.completion.intervention)
+median_cost_end_con <- median(ICER.df$Cost.per.completion.control)
+mean_cost_ini_int <- mean(ICER.df$Cost.per.initiation.intervention)
+mean_cost_ini_con <- mean(ICER.df$Cost.per.initiation.control)
+mean_cost_end_int <- mean(ICER.df$Cost.per.completion.intervention)
+mean_cost_end_con <- mean(ICER.df$Cost.per.completion.control)
+
+#Centrality parameters from sim.out
+median_pp_del_int <- median(sim.out.df[,47])
+median_pp_del_con <- median(sim.out.df[,48])
+median_pp_pat_int <- median(sim.out.df[,49])
+median_pp_pat_con <- median(sim.out.df[,50])
+median_pp_tot_int <- median(sim.out.df[,51])
+median_pp_tot_con <- median(sim.out.df[,52])
+mean_pp_del_int <- mean(sim.out.df[,47])
+mean_pp_del_con <- mean(sim.out.df[,48])
+mean_pp_pat_int <- mean(sim.out.df[,49])
+mean_pp_pat_con <- mean(sim.out.df[,50])
+mean_pp_tot_int <- mean(sim.out.df[,51])
+mean_pp_tot_con <- mean(sim.out.df[,52])
+
+median_cost_ini_int_dir <- median(sim.out.df[,64])
+median_cost_ini_con_dir <- median(sim.out.df[,65])
+median_cost_end_int_dir <- median(sim.out.df[,66])
+median_cost_end_con_dir <- median(sim.out.df[,67])
+median_icer_ini_dir <- median(sim.out.df[,62])
+median_icer_end_dir <- median(sim.out.df[,63])
+
+#95% CI values
+#per HH delivery cost intervention
+quantile(sim.out.df[,47], 0.500)
+quantile(sim.out.df[,47],0.025)
+quantile(sim.out.df[,47],0.975)
+
+
+#per HH delivery cost control
+
+quantile(sim.out.df[,48], 0.500)
+quantile(sim.out.df[,48],0.025)
+quantile(sim.out.df[,48],0.975)
+
+#per HH patient costs intervention
+quantile(sim.out.df[,49], 0.500)
+quantile(sim.out.df[,49],0.025)
+quantile(sim.out.df[,49],0.975)
+
+#per HH patient costs control
+quantile(sim.out.df[,50], 0.500)
+quantile(sim.out.df[,50],0.025)
+quantile(sim.out.df[,50],0.975)
+
+#per HH total costs intervention
+quantile(sim.out.df[,51], 0.500)
+quantile(sim.out.df[,51],0.025)
+quantile(sim.out.df[,51],0.975)
+
+#per HH total costs control
+quantile(sim.out.df[,52], 0.500)
+quantile(sim.out.df[,52],0.025)
+quantile(sim.out.df[,52],0.975)
+
+#per HH split of total costs
+
+# comm
+quantile(sim.out.df[,11], 0.500)
+quantile(sim.out.df[,13], 0.500)
+quantile(sim.out.df[,11], 0.02500)
+quantile(sim.out.df[,13], 0.02500)
+quantile(sim.out.df[,11], 0.97500)
+quantile(sim.out.df[,13], 0.97500)
+
+#eps
+quantile(sim.out.df[,15], 0.500)
+quantile(sim.out.df[,17], 0.500)
+quantile(sim.out.df[,15], 0.02500)
+quantile(sim.out.df[,17], 0.02500)
+quantile(sim.out.df[,15], 0.97500)
+quantile(sim.out.df[,17], 0.97500)
+#ope
+quantile(sim.out.df[,19], 0.500)
+quantile(sim.out.df[,21], 0.500)
+quantile(sim.out.df[,19], 0.02500)
+quantile(sim.out.df[,21], 0.02500)
+quantile(sim.out.df[,19], 0.97500)
+quantile(sim.out.df[,21], 0.97500)
+#ps
+quantile(sim.out.df[,23], 0.500)
+quantile(sim.out.df[,25], 0.500)
+quantile(sim.out.df[,23], 0.02500)
+quantile(sim.out.df[,25], 0.02500)
+quantile(sim.out.df[,23], 0.97500)
+quantile(sim.out.df[,25], 0.97500)
+#tt
+quantile(sim.out.df[,27], 0.500)
+quantile(sim.out.df[,29], 0.500)
+quantile(sim.out.df[,27], 0.02500)
+quantile(sim.out.df[,29], 0.02500)
+quantile(sim.out.df[,27], 0.97500)
+quantile(sim.out.df[,29], 0.97500)
+#eqp
+quantile(sim.out.df[,31], 0.500)
+quantile(sim.out.df[,33], 0.500)
+quantile(sim.out.df[,31], 0.02500)
+quantile(sim.out.df[,33], 0.02500)
+quantile(sim.out.df[,31], 0.97500)
+quantile(sim.out.df[,33], 0.97500)
+#hss
+quantile(sim.out.df[,35], 0.500)
+quantile(sim.out.df[,37], 0.500)
+quantile(sim.out.df[,35], 0.02500)
+quantile(sim.out.df[,37], 0.02500)
+quantile(sim.out.df[,35], 0.97500)
+quantile(sim.out.df[,37], 0.97500)
+#oop
+quantile(sim.out.df[,39], 0.500)
+quantile(sim.out.df[,41], 0.500)
+quantile(sim.out.df[,39], 0.02500)
+quantile(sim.out.df[,41], 0.02500)
+quantile(sim.out.df[,39], 0.97500)
+quantile(sim.out.df[,41], 0.97500)
+#mw
+quantile(sim.out.df[,43], 0.500)
+quantile(sim.out.df[,45], 0.500)
+quantile(sim.out.df[,43], 0.02500)
+quantile(sim.out.df[,45], 0.02500)
+quantile(sim.out.df[,43], 0.97500)
+quantile(sim.out.df[,45], 0.97500)
+#delivery cost per child initiated intervention 
+quantile(sim.out.df[,64], 0.500)
+quantile(sim.out.df[,64],0.025)
+quantile(sim.out.df[,64],0.975)
+
+#delivery cost per child initiated control
+quantile(sim.out.df[,65], 0.500)
+quantile(sim.out.df[,65],0.025)
+quantile(sim.out.df[,65],0.975)
+
+#delivery cost per child completed intervention 
+quantile(sim.out.df[,66], 0.500)
+quantile(sim.out.df[,66],0.025)
+quantile(sim.out.df[,66],0.975)
+
+#delivery cost per child completed control
+quantile(sim.out.df[,67], 0.500)
+quantile(sim.out.df[,67],0.025)
+quantile(sim.out.df[,67],0.975)
+
+#total cost per child initiated intervention 
+quantile(ICER.df[,10], 0.500)
+quantile(ICER.df[,10],0.025)
+quantile(ICER.df[,10],0.975)
+
+#total cost per child initiated control
+quantile(ICER.df[,11], 0.500)
+quantile(ICER.df[,11],0.025)
+quantile(ICER.df[,11],0.975)
+
+#total cost per child completed intervention 
+quantile(ICER.df[,12], 0.500)
+quantile(ICER.df[,12],0.025)
+quantile(ICER.df[,12],0.975)
+
+#total cost per child completed control
+quantile(ICER.df[,13], 0.500)
+quantile(ICER.df[,13],0.025)
+quantile(ICER.df[,13],0.975)
+
+#ICER initiated 
+
+quantile(sim.out.df[,62], 0.500)
+quantile(sim.out.df[,62],0.025)
+quantile(sim.out.df[,62],0.975)
+
+#ICER completed
+quantile(sim.out.df[,63], 0.500)
+quantile(sim.out.df[,63],0.025)
+quantile(sim.out.df[,63],0.975)
+
+
+
+
+```
+```{r Calculate our beta distribution values}
+#First calculate the Y value (mode) based on a desired peak/PE, X
+yvalue <- function(x, min, max) {
+  y <- ((x-min)/(max-min))
+  return(y)
+}
+#Where y = mode of the distribution
+
+betavalue <- function(a, y){
+  beta <- ((a - 1)/y) - a + 2
+  return(beta)
+}
+```                                
+#yvalue(0.21, 0.04, 1.33)
+#betavalue(4, 0.4035088)
+
+
+
+```
+library(readr)
+write_csv(sim.out.df, "sim_out.csv")
